@@ -171,6 +171,8 @@ helm install ai-observe-stack ai-observe-stack/ai-observe-stack -n ai-observe-st
 | `doris.internal.cluster.be.replicas` | BE 副本数 | `1` |
 | `otel.enabled` | 启用 OpenTelemetry Collector | `true` |
 | `otel.replicas` | OTel Collector 副本数 | `2` |
+| `otel.policies.redaction.enabled` | 在 Gateway 删除敏感属性并掩码文本日志正文 | `true` |
+| `otel.policies.filter.enabled` | 启用基于 OTTL 的噪声遥测过滤 | `false` |
 | `logCollector.enabled` | 启用节点级日志采集 DaemonSet | `false` |
 | `logCollector.mode` | 日志采集模式，目前支持 `containerStdout` | `containerStdout` |
 | `logCollector.hostPaths.dockerContainers` | Docker runtime 场景下可选挂载的日志 symlink 目标目录 | `""` |
@@ -202,6 +204,40 @@ helm install ai-observe-stack ai-observe-stack/ai-observe-stack -n ai-observe-st
 - 任何有效的 [IANA 时区](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)
 
 > **注意：** 时区一致性非常重要。Doris 和 OTel Collector 之间的时区不匹配会导致 Grafana 仪表盘显示错误的时间范围（例如，"Last 15 minutes" 查询返回无数据）。
+
+---
+
+## OTel Gateway Policy
+
+AIObserve Stack 会在 OTel Gateway 写入 Doris 前执行集中式遥测治理。业务服务继续使用各语言的 OpenTelemetry SDK 或自动探针通过 OTLP 上报，无需因为规则变更而逐个发版。
+
+默认启用脱敏策略：Gateway 会删除 resource、span 和 log attributes 中的 `authorization`、`cookie`、`set-cookie`、`password`、`token`、`secret`、`api_key` 等字段；span 还会删除 `db.statement`。对于字符串类型的日志正文，Bearer Token、密码键值和 API Key/Token/Secret 键值会替换成 `[REDACTED]`。JSON 或二进制正文不会被解析。
+
+可通过自定义 values 覆盖默认规则，并用 OTTL 条件过滤噪声数据：
+
+```yaml
+otel:
+  policies:
+    redaction:
+      spanAttributeKeys:
+        - authorization
+        - db.statement
+        - enduser.id
+      logBodyPatterns:
+        - '(?i)session[_-]?id\s*[:=]\s*[^,\s&;]+'
+    filter:
+      enabled: true
+      traces:
+        - 'name == "GET /healthz"'
+      metrics:
+        - 'name == "http.server.request.duration" and resource.attributes["service.name"] == "health-check"'
+      logs:
+        - 'resource.attributes["service.name"] == "health-check" and severity_number < SEVERITY_NUMBER_WARN'
+```
+
+规则被渲染为 Collector 的 `transform` 和 `filter` processors，顺序固定为 `memory_limiter → policy → batch → doris`。非法 OTTL 表达式会导致 Collector 启动失败，避免规则被静默忽略。变更 `otel.policies` 会改变 Collector ConfigMap checksum，并触发 Gateway StatefulSet 的滚动更新。
+
+建议使用 Kubernetes `NetworkPolicy` 或出口控制，只允许工作负载访问本 Chart 部署的 OTLP Gateway；否则服务仍可能绕过集中策略直接把遥测发送到其他后端。Gateway 是最后一道统一保护层，业务代码仍不应主动记录密码、密钥或完整个人数据。
 
 ---
 

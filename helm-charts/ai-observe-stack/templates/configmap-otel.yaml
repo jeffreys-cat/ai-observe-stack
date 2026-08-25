@@ -2,6 +2,8 @@
 OpenTelemetry Collector Configuration ConfigMap
 */}}
 {{- if .Values.otel.enabled }}
+{{- $redactionEnabled := .Values.otel.policies.redaction.enabled }}
+{{- $filterEnabled := and .Values.otel.policies.filter.enabled (or .Values.otel.policies.filter.traces .Values.otel.policies.filter.metrics .Values.otel.policies.filter.logs) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -88,6 +90,73 @@ data:
         check_interval: {{ .Values.otel.memoryLimiter.checkInterval }}
         limit_mib: {{ .Values.otel.memoryLimiter.limitMib }}
         spike_limit_mib: {{ .Values.otel.memoryLimiter.spikeLimitMib }}
+
+      {{- if $redactionEnabled }}
+      # Redact sensitive values before telemetry is exported outside the gateway.
+      # error_mode: propagate makes malformed statements fail the Collector instead
+      # of silently allowing ungoverned telemetry through.
+      transform/redaction:
+        error_mode: propagate
+        trace_statements:
+          - context: resource
+            statements:
+              {{- range .Values.otel.policies.redaction.resourceAttributeKeys }}
+              - delete_key(resource.attributes, {{ . | quote }})
+              {{- end }}
+          - context: span
+            statements:
+              {{- range .Values.otel.policies.redaction.spanAttributeKeys }}
+              - delete_key(span.attributes, {{ . | quote }})
+              {{- end }}
+        metric_statements:
+          - context: resource
+            statements:
+              {{- range .Values.otel.policies.redaction.resourceAttributeKeys }}
+              - delete_key(resource.attributes, {{ . | quote }})
+              {{- end }}
+        log_statements:
+          - context: resource
+            statements:
+              {{- range .Values.otel.policies.redaction.resourceAttributeKeys }}
+              - delete_key(resource.attributes, {{ . | quote }})
+              {{- end }}
+          - context: log
+            statements:
+              {{- range .Values.otel.policies.redaction.logAttributeKeys }}
+              - delete_key(log.attributes, {{ . | quote }})
+              {{- end }}
+              {{- range .Values.otel.policies.redaction.logBodyPatterns }}
+              - replace_pattern(log.body, {{ . | quote }}, "[REDACTED]") where IsString(log.body)
+              {{- end }}
+      {{- end }}
+
+      {{- if $filterEnabled }}
+      # Drop telemetry that matches configured OTTL noise filters.
+      # Collector startup fails when an expression is malformed.
+      filter/noise:
+        error_mode: propagate
+        {{- if .Values.otel.policies.filter.traces }}
+        traces:
+          span:
+            {{- range .Values.otel.policies.filter.traces }}
+            - {{ . | quote }}
+            {{- end }}
+        {{- end }}
+        {{- if .Values.otel.policies.filter.metrics }}
+        metrics:
+          metric:
+            {{- range .Values.otel.policies.filter.metrics }}
+            - {{ . | quote }}
+            {{- end }}
+        {{- end }}
+        {{- if .Values.otel.policies.filter.logs }}
+        logs:
+          log_record:
+            {{- range .Values.otel.policies.filter.logs }}
+            - {{ . | quote }}
+            {{- end }}
+        {{- end }}
+      {{- end }}
 
     exporters:
       # Doris exporter - single exporter for traces, logs, and metrics
@@ -177,7 +246,7 @@ data:
       pipelines:
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, batch]
+          processors: [memory_limiter{{ if $redactionEnabled }}, transform/redaction{{ end }}{{ if $filterEnabled }}, filter/noise{{ end }}, batch]
           exporters:
             - doris
             {{- if .Values.otel.debug.enabled }}
@@ -193,7 +262,7 @@ data:
             {{- if and .Values.otel.selfMonitoring.enabled .Values.otel.selfMonitoring.prometheus.enabled }}
             - prometheus
             {{- end }}
-          processors: [memory_limiter, batch]
+          processors: [memory_limiter{{ if $redactionEnabled }}, transform/redaction{{ end }}{{ if $filterEnabled }}, filter/noise{{ end }}, batch]
           exporters:
             - doris
             {{- if .Values.otel.debug.enabled }}
@@ -202,7 +271,7 @@ data:
 
         logs:
           receivers: [otlp]
-          processors: [memory_limiter, batch]
+          processors: [memory_limiter{{ if $redactionEnabled }}, transform/redaction{{ end }}{{ if $filterEnabled }}, filter/noise{{ end }}, batch]
           exporters:
             - doris
             {{- if .Values.otel.debug.enabled }}

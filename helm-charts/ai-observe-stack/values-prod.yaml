@@ -79,6 +79,12 @@ otel:
   debug:
     enabled: false  # Disable in production
 
+  policies:
+    redaction:
+      enabled: true
+    filter:
+      enabled: false
+
 grafana:
   adminPassword: "CHANGE_ME_IN_PRODUCTION"
 
