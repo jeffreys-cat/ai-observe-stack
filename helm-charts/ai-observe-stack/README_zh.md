@@ -118,6 +118,8 @@ helm install dog-k8s-collector ./dog-k8s-collector -n dog \
 
 ## OTel Gateway Policy
 
+不使用 Helm 的部署可参考 [OTel Gateway Policy 手动配置](../OTEL_GATEWAY_POLICY_MANUAL_CONFIG_zh.md)。
+
 AIObserve Stack 会在 OTel Gateway 写入 Doris 前执行集中式遥测治理。业务服务继续使用各语言的 OpenTelemetry SDK 或自动探针通过 OTLP 上报，无需因为规则变更而逐个发版。
 
 默认启用脱敏策略：Gateway 会删除 resource、span 和 log attributes 中的 `authorization`、`cookie`、`set-cookie`、`password`、`token`、`secret`、`api_key` 等字段；span 还会删除 `db.statement`。对于字符串类型的日志正文，Bearer Token、密码键值和 API Key/Token/Secret 键值会替换成 `[REDACTED]`。JSON 或二进制正文不会被解析。
