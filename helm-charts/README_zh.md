@@ -239,6 +239,8 @@ otel:
 
 建议使用 Kubernetes `NetworkPolicy` 或出口控制，只允许工作负载访问本 Chart 部署的 OTLP Gateway；否则服务仍可能绕过集中策略直接把遥测发送到其他后端。Gateway 是最后一道统一保护层，业务代码仍不应主动记录密码、密钥或完整个人数据。
 
+不使用 Helm 时，请直接修改 Gateway Collector 配置；完整操作示例见 [非 Helm 部署：配置 OTel Gateway Policy](./OTEL_GATEWAY_POLICY_MANUAL_CONFIG_zh.md)。
+
 ---
 
 ## 使用 Secrets
